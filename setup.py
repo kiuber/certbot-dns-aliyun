@@ -13,6 +13,7 @@ install_requires = [
     'certbot>=2.0.0',
     'mock',
     'setuptools',
+    'pyunycode==0.1.1',
 ]
 
 docs_extras = [

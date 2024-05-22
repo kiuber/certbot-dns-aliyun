@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from hashlib import sha1
 import base64
@@ -14,6 +13,7 @@ except:
 import requests
 from certbot import errors
 from certbot.plugins import dns_common
+import pyunycode
 
 API_ENDPOINT = 'https://alidns.aliyuncs.com/'
 
@@ -55,6 +55,7 @@ class AliDNSClient():
                                  .format(domain, domain_name_guesses))
 
     def _find_domain_record_id(self, domain, rr = '', typ = '', value = ''):
+        domain = self.determine_domain(domain)
         records = self._request('DescribeDomainRecords', {
             'DomainName': domain,
             'RRKeyWord': rr,
@@ -68,8 +69,8 @@ class AliDNSClient():
                                  .format(rr, 'record not found'))
 
     def add_txt_record(self, domain, record_name, value):
-        domain = self._find_domain_id(domain)
-        rr = record_name[:record_name.rindex('.' + domain)]
+        domain = self._find_domain_id(self.determine_domain(domain))
+        rr = self.determine_rr(domain, record_name)
         self._request('AddDomainRecord', {
             'DomainName': domain,
             'RR': rr,
@@ -79,8 +80,8 @@ class AliDNSClient():
         })
 
     def del_txt_record(self, domain, record_name, value):
-        domain = self._find_domain_id(domain)
-        rr = record_name[:record_name.rindex('.' + domain)]
+        domain = self._find_domain_id(self.determine_domain(domain))
+        rr = self.determine_rr(domain, record_name)
         record_id = self._find_domain_record_id(domain, rr=rr, typ='TXT')
         self._request('DeleteDomainRecord', {
             'DomainName': domain,
@@ -135,3 +136,32 @@ class AliDNSClient():
         if not e.Code.startswith('InvalidDomainName.'):
             return errors.PluginError('Unexpected error determining zone identifier for {0}: {1}'
                                       .format(domain_name, e))
+
+    def determine_rr(self, _domain, _record_name):
+        domain, record_name = self.determine_record_name(_domain, _record_name)
+        return record_name[:record_name.rindex('.' + domain)]
+
+    def determine_record_name(self, _domain, _record_name):
+        domain = self.determine_domain(_domain)
+        # idn case
+        if self._is_idn_punycode(_record_name):
+            name_list = []
+            for _name in _record_name.split('.'):
+                try:
+                    name = pyunycode.convert(_name)
+                except:
+                    # exception case: e.g. '_' and {idn} in _record_name
+                    name = _name
+                name_list.append(name)
+            record_name = '.'.join(name_list)
+        else:
+            record_name = _record_name
+        return domain, record_name
+
+    def determine_domain(self, domain):
+        if self._is_idn_punycode(domain):
+            domain = pyunycode.convert(domain)
+        return domain
+
+    def _is_idn_punycode(self, domain):
+        return (domain[:4] == "xn--") | (".xn--" in domain)
